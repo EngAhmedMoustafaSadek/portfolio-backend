@@ -66,5 +66,6 @@
 
 // pages/api/contact.js
 export default function handler(req, res) {
+  console.log('Request received:', req.method);
   res.status(200).json({ message: 'API is working!' });
 }
