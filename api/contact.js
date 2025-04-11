@@ -64,8 +64,8 @@
 //   }
 // };
 
-// pages/api/contact.js
-export default function handler(req, res) {
+// api/contact.js
+module.exports = (req, res) => {
   console.log('Request received:', req.method);
   res.status(200).json({ message: 'API is working!' });
-}
+};
