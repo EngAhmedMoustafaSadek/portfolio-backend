@@ -1,37 +1,35 @@
 // api/contact.js
 const nodemailer = require('nodemailer');
+const { Redis } = require('@upstash/redis');
 
-// In-memory rate limit store (for simplicity, use a more persistent solution like Redis for production)
-const rateLimitStore = {};
+// Initialize Redis client
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
+// Rate limiting constants
+const RATE_LIMIT_WINDOW = 15 * 60; // 15 minutes (in seconds)
 const RATE_LIMIT_MAX_REQUESTS = 5; // Max 5 requests in the time window
 
-function rateLimit(req) {
-  const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-
-  // If there's no IP stored, initialize it
-  if (!rateLimitStore[ip]) {
-    rateLimitStore[ip] = { count: 1, firstRequestTime: Date.now() };
+async function checkRateLimit(ip) {
+  try {
+    // Get current count for this IP
+    const key = `ratelimit:${ip}`;
+    const count = await redis.incr(key);
+    
+    // Set expiry on first request
+    if (count === 1) {
+      await redis.expire(key, RATE_LIMIT_WINDOW);
+    }
+    
+    // Return whether the request is allowed
+    return count <= RATE_LIMIT_MAX_REQUESTS;
+  } catch (error) {
+    console.error('Rate limit check error:', error);
+    // If there's an error checking rate limit, allow the request to proceed
     return true;
   }
-
-  const elapsedTime = Date.now() - rateLimitStore[ip].firstRequestTime;
-
-  // If the time window has passed, reset the counter
-  if (elapsedTime > RATE_LIMIT_WINDOW) {
-    rateLimitStore[ip] = { count: 1, firstRequestTime: Date.now() };
-    return true;
-  }
-
-  // If the count exceeds the limit, deny the request
-  if (rateLimitStore[ip].count >= RATE_LIMIT_MAX_REQUESTS) {
-    return false;
-  }
-
-  // Otherwise, increment the count and allow the request
-  rateLimitStore[ip].count += 1;
-  return true;
 }
 
 export default async function handler(req, res) {
@@ -39,8 +37,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
+  // Get client IP (Vercel provides it in headers)
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
   // Rate limiting check
-  if (!rateLimit(req)) {
+  const allowed = await checkRateLimit(ip);
+  if (!allowed) {
     return res.status(429).json({ success: false, message: 'Too many requests, please try again later.' });
   }
 
@@ -85,7 +87,6 @@ export default async function handler(req, res) {
 
     // Send the email
     await transporter.sendMail(mailOptions);
-
     res.status(200).json({ success: true, message: 'Message sent successfully!' });
   } catch (error) {
     console.error('Email sending error:', error);
