@@ -1,49 +1,10 @@
 // api/contact.js
 const nodemailer = require('nodemailer');
-const { Redis } = require('@upstash/redis');
-
-// Initialize Redis client
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
-
-// Rate limiting constants
-const RATE_LIMIT_WINDOW = 15 * 60; // 15 minutes (in seconds)
-const RATE_LIMIT_MAX_REQUESTS = 5; // Max 5 requests in the time window
-
-async function checkRateLimit(ip) {
-  try {
-    // Get current count for this IP
-    const key = `ratelimit:${ip}`;
-    const count = await redis.incr(key);
-    
-    // Set expiry on first request
-    if (count === 1) {
-      await redis.expire(key, RATE_LIMIT_WINDOW);
-    }
-    
-    // Return whether the request is allowed
-    return count <= RATE_LIMIT_MAX_REQUESTS;
-  } catch (error) {
-    console.error('Rate limit check error:', error);
-    // If there's an error checking rate limit, allow the request to proceed
-    return true;
-  }
-}
 
 export default async function handler(req, res) {
+  // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, message: 'Method not allowed' });
-  }
-
-  // Get client IP (Vercel provides it in headers)
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-
-  // Rate limiting check
-  const allowed = await checkRateLimit(ip);
-  if (!allowed) {
-    return res.status(429).json({ success: false, message: 'Too many requests, please try again later.' });
   }
 
   const { name, email, subject, message } = req.body;
